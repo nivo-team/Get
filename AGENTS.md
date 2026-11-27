@@ -9,7 +9,7 @@
 - 探索领域前读取 `CONTEXT.md` 和相关 `docs/adr/`。术语表仅记录领域语言，架构决策写入 ADR，功能与验收直接在 GitHub Issues 闭环跟踪。
 - 技术选型已确认：
   - 桌面框架：Wails v3 Beta (`v3.0.0-beta.20`)（遵循 ADR-0002）
-  - 后端：Go 1.27 (`go 1.27.1`)
+  - 后端：Go 1.27 (`go 1.27.3`)
   - 前端基座：React 19 + TypeScript + Vite
   - 样式与组件：Tailwind CSS v4 + Radix UI 原语 (`@radix-ui/react-*`) + Lucide 图标
   - 交互与过渡动画：`motion` (Framer Motion)

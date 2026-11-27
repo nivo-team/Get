@@ -60,3 +60,6 @@ desktop.ini
 
 # Local debugging scratch
 .tmp/
+
+# Legacy WebView UI backup (local reference only)
+legacy-ui/

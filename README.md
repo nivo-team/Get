@@ -158,7 +158,7 @@ build/dist/
 
 - **Node.js**：`24.21.0` 或更高版本
 - **Bun**：`v1.4.2` 或更高版本
-- **Go**：`1.27.1` 或更高版本
+- **Go**：`1.27.3` 或更高版本
 - **CGO 编译环境**：Windows 推荐 MinGW-w64 (GCC)，Linux 需安装 `libgtk-4-dev`、`libwebkitgtk-6.0-dev` 与 `pkg-config`，macOS 需安装 Xcode 命令行工具。
 
 ### 1. 初始化项目

@@ -183,10 +183,11 @@ async function main() {
     await ensureWindowsTools();
   }
 
-  // 1. Build desktop frontend. go:embed 打进二进制的是 frontend/dist，必须在编译前刷新，
-  // 否则包内会静默残留上一次构建的界面。
-  console.log('[Package] Building desktop frontend...');
-  run('bun', ['run', 'build'], { cwd: join(root, 'frontend'), quiet: true });
+  // 1. Build desktop frontend (when legacy/web frontend exists).
+  if (existsSync(join(root, 'frontend'))) {
+    console.log('[Package] Building desktop frontend...');
+    run('bun', ['run', 'build'], { cwd: join(root, 'frontend'), quiet: true });
+  }
 
   // 2. Build browser extension
   console.log('[Package] Building browser extension...');

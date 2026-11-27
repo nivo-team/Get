@@ -58,12 +58,17 @@ func TestFileTaskStoreReadsDoNotWaitForDiskWrite(t *testing.T) {
 	case err := <-read:
 		if err != nil {
 			close(release)
-			<-saved
+			// 写盘的错误不影响这里要报的结论：下面那条断言只看读是否被挡住。
+			if saveErr := <-saved; saveErr != nil {
+				t.Logf("同时进行的写盘也失败了：%v", saveErr)
+			}
 			t.Fatalf("read failed while a write was in progress: %v", err)
 		}
 	case <-time.After(2 * time.Second):
 		close(release)
-		<-saved
+		if err := <-saved; err != nil {
+			t.Logf("写盘失败：%v", err)
+		}
 		t.Fatal("Get/List blocked while a disk write was in progress")
 	}
 

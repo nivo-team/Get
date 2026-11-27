@@ -177,7 +177,9 @@ export function buildMirrors(atRoot = root) {
     );
   }
   return Object.fromEntries(
-    Object.entries(TARGETS).map(([target, file]) => [file, renderTarget(mirrors, target)]),
+    Object.entries(TARGETS)
+      .filter(([target]) => target !== 'frontend' || existsSync(join(atRoot, 'frontend')))
+      .map(([target, file]) => [file, renderTarget(mirrors, target)]),
   );
 }
 

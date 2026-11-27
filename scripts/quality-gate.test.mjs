@@ -1,15 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, copyFileSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  writeFileSync,
+  rmSync,
+  mkdirSync,
+  copyFileSync,
+  readFileSync,
+  existsSync,
+} from 'node:fs';
 import { resolve, join, sep, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ESLint } from '../frontend/node_modules/eslint/lib/api.js';
-import * as prettier from '../frontend/node_modules/prettier/index.mjs';
 import { run } from './process.mjs';
 import { readInfo, versionFiles } from './version.mjs';
 
 const root = resolve(import.meta.dirname, '..');
-const linter = new ESLint({ cwd: join(root, 'frontend') });
+// 桌面界面已经是原生 Go 实现，Web 前端只在本地备份里存在；两套 JS 工具的契约检查
+// 跟着前端一起缺席，而不是拿不存在的路径去加载模块。
+const hasFrontend = existsSync(join(root, 'frontend'));
+const { ESLint } = hasFrontend ? await import('../frontend/node_modules/eslint/lib/api.js') : {};
+const prettier = hasFrontend ? await import('../frontend/node_modules/prettier/index.mjs') : {};
+const linter = hasFrontend ? new ESLint({ cwd: join(root, 'frontend') }) : null;
 const lint = (text) => linter.lintText(text, { filePath: join(root, 'frontend/src/App.tsx') });
 const exec = (command, args, options = {}) =>
   spawnSync(command, args, { encoding: 'utf8', ...options });
@@ -19,7 +30,7 @@ test('process wrapper propagates child failure and missing executable', () => {
   assert.throws(() => run('sheepget-quality-missing-tool', []));
 });
 
-test('lint detects hooks, unsafe types, promises and deprecated calls', async () => {
+test('lint detects hooks, unsafe types, promises and deprecated calls', { skip: !hasFrontend }, async () => {
   const cases = [
     ['export const value: any = 1;', '@typescript-eslint/no-explicit-any'],
     [
@@ -43,7 +54,7 @@ test('lint detects hooks, unsafe types, promises and deprecated calls', async ()
   assert.equal(valid[0].errorCount, 0);
 });
 
-test('TypeScript 7 rejects semantic errors and accepts valid code', () => {
+test('TypeScript 7 rejects semantic errors and accepts valid code', { skip: !hasFrontend }, () => {
   const base = join(root, '.tools');
   const fixture = mkdtempSync(join(base, 'typescript-probe-'));
   try {
@@ -67,7 +78,7 @@ test('TypeScript 7 rejects semantic errors and accepts valid code', () => {
   }
 });
 
-test('Prettier loads Tailwind stylesheet and sorts Tailwind classes', async () => {
+test('Prettier loads Tailwind stylesheet and sorts Tailwind classes', { skip: !hasFrontend }, async () => {
   const cli = join(root, 'frontend/node_modules/prettier/bin/prettier.cjs');
   for (const cwd of [root, join(root, 'frontend')]) {
     const result = exec(process.execPath, [cli, '--check', join(root, 'frontend/package.json')], {
@@ -278,13 +289,14 @@ test('protocol mirror check rejects drift and a key/ID mismatch', () => {
   const read = (path) => readFileSync(path, 'utf8');
   const check = () => exec(process.execPath, [cli, '--check']);
   try {
-    for (const file of [
+    const files = [
       'internal/protocol/protocol.go',
       'extension/wxt.config.ts',
       'extension/lib/protocol.generated.ts',
-      'frontend/src/lib/protocol.generated.ts',
       'scripts/protocol.mjs',
-    ]) {
+    ];
+    if (hasFrontend) files.push('frontend/src/lib/protocol.generated.ts');
+    for (const file of files) {
       mkdirSync(dirname(join(fixture, file)), { recursive: true });
       copyFileSync(join(root, file), join(fixture, file));
     }

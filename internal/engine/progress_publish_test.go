@@ -134,7 +134,9 @@ func TestHTTPDownloader_PublishDoesNotHoldChunkLock(t *testing.T) {
 	case <-sink.secondStarted:
 	case <-time.After(2 * time.Second):
 		close(sink.firstRelease)
-		<-errCh
+		if err := <-errCh; err != nil {
+			t.Logf("传输在卡住的发布后面停了下来：%v", err)
+		}
 		t.Fatal("chunk workers stalled behind an in-flight publish: PublishSnapshot must run outside coord.mu")
 	}
 	close(sink.firstRelease)

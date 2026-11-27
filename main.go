@@ -1,117 +1,118 @@
 package main
 
 import (
-	"embed"
-	"os"
+	"context"
+	_ "embed"
 
-	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/events"
-	"sheep-get/internal/chrome"
+	"sheep-get/internal/clipboard"
 	"sheep-get/internal/config"
+	"sheep-get/internal/server"
+	"sheep-get/internal/task"
+	"sheep-get/internal/ui"
+	"sheep-get/internal/window"
 )
 
-//go:embed all:frontend/dist
-var assets embed.FS
+//go:embed build/appicon.png
+var trayIconPNG []byte
+
+type appUIBackend struct {
+	app *App
+}
+
+func (b *appUIBackend) ListTasks() ([]*task.Task, error) {
+	return b.app.ListTasks()
+}
+
+func (b *appUIBackend) PauseTask(id string) error {
+	return b.app.PauseTask(id)
+}
+
+func (b *appUIBackend) ResumeTask(id string) error {
+	return b.app.ResumeTask(id)
+}
+
+func (b *appUIBackend) RetryTask(id string) error {
+	return b.app.RetryTask(id)
+}
+
+func (b *appUIBackend) DeleteTask(id string, deleteDiskFile bool) error {
+	return b.app.DeleteTask(id, deleteDiskFile)
+}
+
+func (b *appUIBackend) OpenFile(path string) error {
+	return b.app.OpenFile(path)
+}
+
+func (b *appUIBackend) OpenFolder(path string) error {
+	return b.app.OpenFolder(path)
+}
+
+func (b *appUIBackend) OpenNewDownloadWithClipboard(text string) error {
+	_, err := b.app.OpenNewDownloadWithClipboard(text)
+	return err
+}
+
+func (b *appUIBackend) GetActiveFileInfo() (*window.FileInfoItem, error) {
+	return b.app.GetActiveFileInfo()
+}
+
+func (b *appUIBackend) SubmitFileInfo(sub window.FileInfoSubmission) error {
+	_, err := b.app.SubmitFileInfo(sub)
+	return err
+}
+
+func (b *appUIBackend) CancelCurrentFileInfo() error {
+	return b.app.CancelCurrentFileInfo()
+}
+
+func (b *appUIBackend) SwitchFileInfoActive(index int) (*window.FileInfoItem, error) {
+	return b.app.SwitchFileInfoActive(index)
+}
+
+func (b *appUIBackend) SetFileInfoWindowView(view window.WindowView) {
+	b.app.SetFileInfoWindowView(view)
+}
+
+func (b *appUIBackend) StartURL(rawURL, filename string) error {
+	return b.app.StartDirectDownload(rawURL, filename, "")
+}
+
+func (b *appUIBackend) GetServerStatus() server.Status {
+	return b.app.GetServerStatus()
+}
+
+func (b *appUIBackend) GetSettings() config.Settings {
+	return b.app.GetSettings()
+}
+
+func (b *appUIBackend) UpdateSettings(s config.Settings) (config.Settings, error) {
+	return b.app.UpdateSettings(s)
+}
+
+func (b *appUIBackend) OpenExtensionFolder() error {
+	return b.app.OpenExtensionFolder()
+}
+
+func (b *appUIBackend) OpenSkillDirectory() error {
+	return b.app.OpenSkillDirectory()
+}
+
+func (b *appUIBackend) AttachClipboard(reader clipboard.Reader) {
+	b.app.AttachClipboard(reader)
+}
+
+func (b *appUIBackend) SetOnTaskChanged(fn func()) {
+	b.app.SetOnTaskChanged(fn)
+}
+
+func (b *appUIBackend) SetOnShowProgress(fn func(taskID string)) {
+	b.app.SetOnShowProgress(fn)
+}
 
 func main() {
-	// Create an instance of the app structure
 	app := NewApp()
+	app.StartServices(context.Background())
+	defer app.Shutdown()
 
-	// Create application with options
-	wailsApp := application.New(application.Options{
-		Name:        "SheepGet",
-		Description: "Modern Desktop Download Manager",
-		Services: []application.Service{
-			application.NewService(app),
-		},
-		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assets),
-		},
-		Windows: application.WindowsOptions{
-			DisableQuitOnLastWindowClosed: true,
-			AdditionalBrowserArgs:         chrome.WindowsAdditionalBrowserArgs,
-		},
-		Linux: application.LinuxOptions{
-			DisableQuitOnLastWindowClosed: true,
-		},
-		OnShutdown: func() {
-			app.Shutdown()
-		},
-	})
-
-	app.setApplication(wailsApp)
-
-	wailsApp.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		st := app.GetSettings()
-		if win, ok := wailsApp.Window.GetByName(winNameMain); ok {
-			chrome.SetupNativeWindow(win, trayIcon)
-			chrome.SetNativeWindowTheme(win, string(st.Appearance.Theme))
-		}
-	})
-
-	wailsApp.Event.OnApplicationEvent(events.Common.ThemeChanged, func(event *application.ApplicationEvent) {
-		isDark := false
-		if event != nil && event.Context() != nil {
-			isDark = event.Context().IsDarkMode()
-		} else if wailsApp.Env != nil {
-			isDark = wailsApp.Env.IsDarkMode()
-		}
-		st := app.GetSettings()
-		if st.Appearance.Theme == config.ThemeSystem {
-			for _, w := range wailsApp.Window.GetAll() {
-				chrome.SetNativeWindowTheme(w, "system")
-			}
-			wailsApp.Event.Emit("theme:systemChanged", map[string]any{
-				"isDarkMode": isDark,
-			})
-		}
-	})
-	st := app.GetSettings()
-	isSilent := st.General.SilentStartup
-	for _, arg := range os.Args[1:] {
-		if arg == "--silent" || arg == "-s" {
-			isSilent = true
-			break
-		}
-	}
-
-	// 主窗口生命周期策略：
-	// 若处于静默启动且开启了轻量模式，则启动时不创建主窗口 WebView 渲染进程；
-	// 若非静默启动，则立即创建并展示主窗口；
-	// 若静默启动但未开启轻量模式，则创建主窗口但初始保持隐藏。
-	if !isSilent {
-		app.ShowMainWindow()
-	} else if !st.General.LightweightMode {
-		app.ensureMainWindow(true)
-	}
-	// Configure cross-platform system tray
-	systemTray := wailsApp.SystemTray.New()
-	// 提示文案由 App 统一生成（版本 + 发现新版本提示），更新检查有结论后回写。
-	app.SetTrayTooltipUpdater(systemTray.SetTooltip)
-	if len(trayIcon) > 0 {
-		systemTray.SetIcon(trayIcon)
-	}
-	systemTray.OnClick(func() {
-		app.ShowMainWindow()
-	})
-
-	trayMenu := wailsApp.NewMenu()
-	trayMenu.Add("显示主窗口").OnClick(func(_ *application.Context) {
-		app.ShowMainWindow()
-	})
-	trayMenu.Add("偏好设置").OnClick(func(_ *application.Context) {
-		app.OpenSettingsWindow()
-	})
-	trayMenu.Add("新建下载").OnClick(func(_ *application.Context) {
-		_, _ = app.OpenNewDownload()
-	})
-	trayMenu.AddSeparator()
-	trayMenu.Add("退出").OnClick(func(_ *application.Context) {
-		wailsApp.Quit()
-	})
-	systemTray.SetMenu(trayMenu)
-	err := wailsApp.Run()
-	if err != nil {
-		println("Error:", err.Error())
-	}
+	ui.Run(&appUIBackend{app: app}, trayIconPNG)
 }

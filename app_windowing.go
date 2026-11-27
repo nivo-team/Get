@@ -457,11 +457,19 @@ func (w *wailsWindowView) Show() {
 	if w.app == nil {
 		return
 	}
+	if w.app.fileInfoView != nil {
+		w.app.fileInfoView.Show()
+		return
+	}
 	w.app.windows.Show(w.name, "")
 }
 
 func (w *wailsWindowView) Hide() {
 	if w.app == nil {
+		return
+	}
+	if w.app.fileInfoView != nil {
+		w.app.fileInfoView.Hide()
 		return
 	}
 	w.app.windows.Hide(w.name)
@@ -471,6 +479,10 @@ func (w *wailsWindowView) Focus() {
 	if w.app == nil {
 		return
 	}
+	if w.app.fileInfoView != nil {
+		w.app.fileInfoView.Focus()
+		return
+	}
 	if win, ok := w.app.windows.Find(w.name); ok {
 		win.Raise()
 	}
@@ -478,6 +490,10 @@ func (w *wailsWindowView) Focus() {
 
 func (w *wailsWindowView) Emit(event string, data any) {
 	if w.app == nil {
+		return
+	}
+	if w.app.fileInfoView != nil {
+		w.app.fileInfoView.Emit(event, data)
 		return
 	}
 	w.app.emit(event, data)

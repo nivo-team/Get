@@ -80,17 +80,19 @@ function ownedPackages() {
 
 function tests() {
   const goTests = files(root, (path) => path.endsWith('_test.go'));
-  const webTests = files(join(root, 'frontend/src'), (path) =>
-    /\.(test|spec)\.[jt]sx?$/.test(path),
-  );
+  const hasFrontend = existsSync(join(root, 'frontend/src'));
+  const webTests = hasFrontend
+    ? files(join(root, 'frontend/src'), (path) => /\.(test|spec)\.[jt]sx?$/.test(path))
+    : [];
   const bootstrap = JSON.parse(readFileSync('scripts/test-scope.json', 'utf8'));
-  if ((!goTests.length || !webTests.length) && !bootstrap.scaffoldOnly) {
+  if ((!goTests.length || (hasFrontend && !webTests.length)) && !bootstrap.scaffoldOnly) {
     throw new Error('Both Go and frontend behavior tests are required');
   }
   run('go', ['test', '-mod=readonly', ...ownedPackages()], { quiet: true });
   if (webTests.length)
     node('node_modules/vitest/vitest.mjs', ['run'], { cwd: join(root, 'frontend') });
-  else console.log('PARTIAL: frontend behavior tests pending (scaffold-only contract)');
+  else if (hasFrontend)
+    console.log('PARTIAL: frontend behavior tests pending (scaffold-only contract)');
   if (!goTests.length) console.log('PARTIAL: Go behavior tests pending (scaffold-only contract)');
   // 每个测试文件一份独立全局：Service Worker 入口的模块状态（如接管规则的就绪标记）
   // 不能从一个文件泄漏到另一个文件，否则用例结果会随文件执行顺序变化。
@@ -100,6 +102,7 @@ function tests() {
 const stages = {
   format() {
     goFormat();
+    if (!existsSync(join(root, 'frontend'))) return;
     node('frontend/node_modules/prettier/bin/prettier.cjs', [
       '--check',
       'scripts',
@@ -128,10 +131,12 @@ const stages = {
     run('go', ['mod', 'verify'], { quiet: true });
     run('go', ['mod', 'tidy', '-diff'], { quiet: true });
     run('bun', ['install', '--frozen-lockfile', '--dry-run', '--ignore-scripts'], { quiet: true });
-    run('bun', ['install', '--frozen-lockfile', '--dry-run', '--ignore-scripts'], {
-      cwd: join(root, 'frontend'),
-      quiet: true,
-    });
+    if (existsSync(join(root, 'frontend'))) {
+      run('bun', ['install', '--frozen-lockfile', '--dry-run', '--ignore-scripts'], {
+        cwd: join(root, 'frontend'),
+        quiet: true,
+      });
+    }
     run('bun', ['install', '--frozen-lockfile', '--dry-run', '--ignore-scripts'], {
       cwd: join(root, 'extension'),
       quiet: true,
@@ -139,24 +144,27 @@ const stages = {
   },
   diagnostics() {
     run(exe('actionlint'), ['-shellcheck=', '-pyflakes='], { quiet: true });
-    node('frontend/node_modules/eslint/bin/eslint.js', [
-      'scripts',
-      'eslint.config.mjs',
-      '--max-warnings',
-      '0',
-    ]);
-    node('node_modules/@typescript/native/bin/tsc', ['--noEmit', '-p', 'tsconfig.json'], {
-      cwd: join(root, 'frontend'),
-    });
-    node('node_modules/eslint/bin/eslint.js', ['.', '--max-warnings', '0'], {
-      cwd: join(root, 'frontend'),
-    });
+    if (existsSync(join(root, 'frontend'))) {
+      node('frontend/node_modules/eslint/bin/eslint.js', [
+        'scripts',
+        'eslint.config.mjs',
+        '--max-warnings',
+        '0',
+      ]);
+      node('node_modules/@typescript/native/bin/tsc', ['--noEmit', '-p', 'tsconfig.json'], {
+        cwd: join(root, 'frontend'),
+      });
+      node('node_modules/eslint/bin/eslint.js', ['.', '--max-warnings', '0'], {
+        cwd: join(root, 'frontend'),
+      });
+    }
     run('bun', ['run', 'compile'], {
       cwd: join(root, 'extension'),
       quiet: true,
     });
   },
   frontendBuild() {
+    if (!existsSync(join(root, 'frontend'))) return;
     node('node_modules/vite/bin/vite.js', ['build'], { cwd: join(root, 'frontend') });
   },
   extensionBuild() {

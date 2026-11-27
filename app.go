@@ -57,7 +57,6 @@ type clipboardWatcher interface {
 
 // App struct
 type App struct {
-	app                 *application.App
 	ctx                 context.Context
 	manager             *engine.Manager
 	store               task.TaskStore
@@ -78,6 +77,8 @@ type App struct {
 	trayTooltipUpdater  func(string)
 	completedNotified   sync.Map
 	onShowProgress      func(taskID string)
+	onTaskChanged       atomic.Pointer[func()]
+	fileInfoView        window.WindowView
 }
 
 // log 返回日志出口；尚未接上日志（测试直接构造 App）时丢弃日志。
@@ -213,25 +214,29 @@ func NewApp() *App {
 	return app
 }
 
-// SetApplication sets the Wails application reference
-func (a *App) setApplication(app *application.App) {
-	a.app = app
-	if a.clipboardWatcher == nil && app != nil && app.Clipboard != nil {
+// AttachClipboard 接上系统剪贴板来源：链接监听与新建下载的剪贴板预填共用同一个读取面。
+//
+// 原生界面在应用作用域就绪后把读取面交进来；监视器跟着设置里的开关启停。读取发生在
+// 监视器自己的轮询协程里，不占用界面的反应式图。
+func (a *App) AttachClipboard(reader clipboard.Reader) {
+	if reader == nil {
+		return
+	}
+	if a.clipboardWatcher == nil {
 		a.clipboardWatcher = clipboard.NewWatcher(
-			app.Clipboard,
+			reader,
 			a.GetSettings,
 			func(urlStr string) {
 				_, _ = a.TriggerDownload(window.DownloadRequest{URL: urlStr})
 			},
 		)
-		st := a.GetSettings()
-		a.clipboardWatcher.SetEnabled(st.Clipboard.Enabled)
 	}
+	a.clipboardWatcher.SetEnabled(a.GetSettings().Clipboard.Enabled)
 }
+
+// getApp 返回当前 Wails 应用实例。原生界面下没有 Wails 应用，取不到就返回 nil，
+// 那些事件与窗口操作在原生界面里都不再走这条路。
 func (a *App) getApp() *application.App {
-	if a.app != nil {
-		return a.app
-	}
 	return application.Get()
 }
 
@@ -294,11 +299,56 @@ func (a *App) Shutdown() {
 	_ = a.log().Close()
 }
 
+// SetOnShowProgress registers a callback invoked when the app requests showing the progress window.
+func (a *App) SetOnShowProgress(fn func(taskID string)) {
+	a.onShowProgress = fn
+}
+
+// SetFileInfoWindowView registers the native UI delegate for the single-instance FileInfo window.
+func (a *App) SetFileInfoWindowView(view window.WindowView) {
+	a.fileInfoView = view
+}
+
+// StartDirectDownload probes and starts a download task directly without waiting for a FileInfo modal.
+func (a *App) StartDirectDownload(rawURL, filename, directory string) error {
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_, err := a.directDownload(ctx, window.DownloadRequest{
+		URL:       rawURL,
+		Filename:  filename,
+		Directory: directory,
+	}, nil)
+	return err
+}
+
+// StartServices starts the background engine, loopback server, and update checks.
+func (a *App) StartServices(ctx context.Context) {
+	a.startup(ctx)
+}
+
+// SetOnTaskChanged registers a callback invoked whenever tasks are updated or deleted.
+func (a *App) SetOnTaskChanged(fn func()) {
+	if fn == nil {
+		a.onTaskChanged.Store(nil)
+		return
+	}
+	a.onTaskChanged.Store(&fn)
+}
+
+func (a *App) notifyTaskChanged() {
+	if p := a.onTaskChanged.Load(); p != nil && *p != nil {
+		(*p)()
+	}
+}
+
 // OnTaskUpdated emits wails event to the frontend whenever a task changes
 func (a *App) OnTaskUpdated(t *task.Task) {
 	if t == nil {
 		return
 	}
+	a.notifyTaskChanged()
 	if app := a.getApp(); app != nil {
 		app.Event.Emit(protocol.EventTaskUpdated, t)
 	}
@@ -321,6 +371,7 @@ func (a *App) OnTaskUpdated(t *task.Task) {
 // OnTaskDeleted emits wails event to the frontend whenever a task is deleted
 func (a *App) OnTaskDeleted(taskID string) {
 	a.completedNotified.Delete(taskID)
+	a.notifyTaskChanged()
 	if app := a.getApp(); app != nil {
 		app.Event.Emit(protocol.EventTaskDeleted, taskID)
 	}
@@ -906,11 +957,21 @@ func (a *App) getClipboardText() (string, bool) {
 // OpenNewDownload opens the FileInfo window, automatically populating the URL
 // if the system clipboard contains a valid HTTP/HTTPS link.
 func (a *App) OpenNewDownload() (*window.DownloadResponse, error) {
+	text, ok := a.getClipboardText()
+	if !ok {
+		text = ""
+	}
+	return a.OpenNewDownloadWithClipboard(text)
+}
+
+// OpenNewDownloadWithClipboard 用界面已经读到的剪贴板文本打开新建下载窗口。
+//
+// 原生界面的剪贴板读取是异步的，也不能在界面线程上阻塞等待：由界面读完再把文本交进来，
+// URL 判定仍然只有 extractClipboardURL 这一处。
+func (a *App) OpenNewDownloadWithClipboard(text string) (*window.DownloadResponse, error) {
 	req := window.DownloadRequest{}
-	if text, ok := a.getClipboardText(); ok {
-		if u, valid := extractClipboardURL(text); valid {
-			req.URL = u
-		}
+	if u, valid := extractClipboardURL(text); valid {
+		req.URL = u
 	}
 	return a.TriggerDownload(req)
 }
